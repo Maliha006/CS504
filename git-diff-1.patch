@@ -1,0 +1,385 @@
+diff --git a/fair.c b/fair.c
+index c62805d..5a94afb 100644
+--- a/fair.c
++++ b/fair.c
+@@ -1376,7 +1376,8 @@ unsigned int sysctl_numa_balancing_hot_threshold = MSEC_PER_SEC;
+ struct numa_group {
+ 	refcount_t refcount;
+ 
+-	spinlock_t lock; /* nr_tasks, tasks */
++	/* spinlock_t lock;*/ /* nr_tasks, tasks */
++	struct mutex lock;
+ 	int nr_tasks;
+ 	pid_t gid;
+ 	int active_nodes;
+@@ -2809,7 +2810,8 @@ static void task_numa_placement(struct task_struct *p)
+ 	unsigned long fault_types[2] = { 0, 0 };
+ 	unsigned long total_faults;
+ 	u64 runtime, period;
+-	spinlock_t *group_lock = NULL;
++	/* spinlock_t *group_lock = NULL;*/
++	struct mutex *group_lock = NULL;
+ 	struct numa_group *ng;
+ 
+ 	/*
+@@ -2831,7 +2833,8 @@ static void task_numa_placement(struct task_struct *p)
+ 	ng = deref_curr_numa_group(p);
+ 	if (ng) {
+ 		group_lock = &ng->lock;
+-		spin_lock_irq(group_lock);
++		/* spin_lock_irq(group_lock); */
++		mutex_lock(group_lock);
+ 	}
+ 
+ 	/* Find the node with the highest number of faults */
+@@ -2902,7 +2905,8 @@ static void task_numa_placement(struct task_struct *p)
+ 
+ 	if (ng) {
+ 		numa_group_count_active_nodes(ng);
+-		spin_unlock_irq(group_lock);
++		/* spin_unlock_irq(group_lock);*/
++		mutex_unlock(group_lock);
+ 		max_nid = preferred_group_nid(p, max_nid);
+ 	}
+ 
+@@ -2947,7 +2951,9 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
+ 		refcount_set(&grp->refcount, 1);
+ 		grp->active_nodes = 1;
+ 		grp->max_faults_cpu = 0;
+-		spin_lock_init(&grp->lock);
++		/* spin_lock_init(&grp->lock);*/
++		mutex_init(&grp->lock);
++
+ 		grp->gid = p->pid;
+ 
+ 		for (i = 0; i < NR_NUMA_HINT_FAULT_STATS * nr_node_ids; i++)
+@@ -3018,8 +3024,11 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
+ 	my_grp->nr_tasks--;
+ 	grp->nr_tasks++;
+ 
+-	spin_unlock(&my_grp->lock);
+-	spin_unlock_irq(&grp->lock);
++	/* spin_unlock(&my_grp->lock);
++	 * spin_unlock_irq(&grp->lock);
++	*/
++	mutex_unlock(&my_grp->lock);
++	mutex_unlock(&grp->lock);
+ 
+ 	rcu_assign_pointer(p->numa_group, grp);
+ 
+@@ -3043,20 +3052,22 @@ void task_numa_free(struct task_struct *p, bool final)
+ 	/* safe: p either is current or is being freed by current */
+ 	struct numa_group *grp = rcu_dereference_raw(p->numa_group);
+ 	unsigned long *numa_faults = p->numa_faults;
+-	unsigned long flags;
++	/* unsigned long flags; */
+ 	int i;
+ 
+ 	if (!numa_faults)
+ 		return;
+ 
+ 	if (grp) {
+-		spin_lock_irqsave(&grp->lock, flags);
++		/* spin_lock_irqsave(&grp->lock, flags);*/
++		mutex_lock(&grp->lock);
+ 		for (i = 0; i < NR_NUMA_HINT_FAULT_STATS * nr_node_ids; i++)
+ 			grp->faults[i] -= p->numa_faults[i];
+ 		grp->total_faults -= p->total_numa_faults;
+ 
+ 		grp->nr_tasks--;
+-		spin_unlock_irqrestore(&grp->lock, flags);
++		/* spin_unlock_irqrestore(&grp->lock, flags); */
++		mutex_unlock(&grp->lock);
+ 		RCU_INIT_POINTER(p->numa_group, NULL);
+ 		put_numa_group(grp);
+ 	}
+@@ -4591,12 +4602,12 @@ update_cfs_rq_load_avg(u64 now, struct cfs_rq *cfs_rq)
+ 		unsigned long r;
+ 		u32 divider = get_pelt_divider(&cfs_rq->avg);
+ 
+-		raw_spin_lock(&cfs_rq->removed.lock);
++		mutex_lock(&cfs_rq->removed.lock);
+ 		swap(cfs_rq->removed.util_avg, removed_util);
+ 		swap(cfs_rq->removed.load_avg, removed_load);
+ 		swap(cfs_rq->removed.runnable_avg, removed_runnable);
+ 		cfs_rq->removed.nr = 0;
+-		raw_spin_unlock(&cfs_rq->removed.lock);
++		mutex_unlock(&cfs_rq->removed.lock);
+ 
+ 		r = removed_load;
+ 		sub_positive(&sa->load_avg, r);
+@@ -4800,7 +4811,7 @@ static void sync_entity_load_avg(struct sched_entity *se)
+ static void remove_entity_load_avg(struct sched_entity *se)
+ {
+ 	struct cfs_rq *cfs_rq = cfs_rq_of(se);
+-	unsigned long flags;
++	/* unsigned long flags;*/
+ 
+ 	/*
+ 	 * tasks cannot exit without having gone through wake_up_new_task() ->
+@@ -4810,12 +4821,14 @@ static void remove_entity_load_avg(struct sched_entity *se)
+ 
+ 	sync_entity_load_avg(se);
+ 
+-	raw_spin_lock_irqsave(&cfs_rq->removed.lock, flags);
++	/* raw_spin_lock_irqsave(&cfs_rq->removed.lock, flags);*/
++	mutex_lock(&cfs_rq->removed.lock);
+ 	++cfs_rq->removed.nr;
+ 	cfs_rq->removed.util_avg	+= se->avg.util_avg;
+ 	cfs_rq->removed.load_avg	+= se->avg.load_avg;
+ 	cfs_rq->removed.runnable_avg	+= se->avg.runnable_avg;
+-	raw_spin_unlock_irqrestore(&cfs_rq->removed.lock, flags);
++	/* raw_spin_unlock_irqrestore(&cfs_rq->removed.lock, flags);*/
++	mutex_unlock(&cfs_rq->removed.lock);
+ }
+ 
+ static inline unsigned long cfs_rq_runnable_avg(struct cfs_rq *cfs_rq)
+@@ -5615,7 +5628,8 @@ static int __assign_cfs_rq_runtime(struct cfs_bandwidth *cfs_b,
+ {
+ 	u64 min_amount, amount = 0;
+ 
+-	lockdep_assert_held(&cfs_b->lock);
++	/* lockdep_assert_held(&cfs_b->lock); */
++	WARN_ON_ONCE(!mutex_is_locked(&cfs_b->lock));
+ 
+ 	/* note: this is a positive sum as runtime_remaining <= 0 */
+ 	min_amount = target_runtime - cfs_rq->runtime_remaining;
+@@ -5643,9 +5657,11 @@ static int assign_cfs_rq_runtime(struct cfs_rq *cfs_rq)
+ 	struct cfs_bandwidth *cfs_b = tg_cfs_bandwidth(cfs_rq->tg);
+ 	int ret;
+ 
+-	raw_spin_lock(&cfs_b->lock);
++	/* raw_spin_lock(&cfs_b->lock); */
++	mutex_lock(&cfs_b->lock);
+ 	ret = __assign_cfs_rq_runtime(cfs_b, cfs_rq, sched_cfs_bandwidth_slice());
+-	raw_spin_unlock(&cfs_b->lock);
++	/* raw_spin_unlock(&cfs_b->lock); */
++	mutex_unlock(&cfs_b->lock);
+ 
+ 	return ret;
+ }
+@@ -5760,7 +5776,9 @@ static bool throttle_cfs_rq(struct cfs_rq *cfs_rq)
+ 	struct sched_entity *se;
+ 	long task_delta, idle_task_delta, dequeue = 1;
+ 
+-	raw_spin_lock(&cfs_b->lock);
++	/* raw_spin_lock(&cfs_b->lock); */
++	mutex_lock(&cfs_b->lock);
++
+ 	/* This will start the period timer if necessary */
+ 	if (__assign_cfs_rq_runtime(cfs_b, cfs_rq, 1)) {
+ 		/*
+@@ -5776,7 +5794,8 @@ static bool throttle_cfs_rq(struct cfs_rq *cfs_rq)
+ 		list_add_tail_rcu(&cfs_rq->throttled_list,
+ 				  &cfs_b->throttled_cfs_rq);
+ 	}
+-	raw_spin_unlock(&cfs_b->lock);
++	/* raw_spin_unlock(&cfs_b->lock); */
++	mutex_unlock(&cfs_b->lock);
+ 
+ 	if (!dequeue)
+ 		return false;  /* Throttle no longer required. */
+@@ -5855,13 +5874,16 @@ void unthrottle_cfs_rq(struct cfs_rq *cfs_rq)
+ 
+ 	update_rq_clock(rq);
+ 
+-	raw_spin_lock(&cfs_b->lock);
++	/* raw_spin_lock(&cfs_b->lock);*/
++	mutex_lock(&cfs_b->lock);
++
+ 	if (cfs_rq->throttled_clock) {
+ 		cfs_b->throttled_time += rq_clock(rq) - cfs_rq->throttled_clock;
+ 		cfs_rq->throttled_clock = 0;
+ 	}
+ 	list_del_rcu(&cfs_rq->throttled_list);
+-	raw_spin_unlock(&cfs_b->lock);
++	/* raw_spin_unlock(&cfs_b->lock);*/
++	mutex_unlock(&cfs_b->lock);
+ 
+ 	/* update hierarchical throttle state */
+ 	walk_tg_tree_from(cfs_rq->tg, tg_nop, tg_unthrottle_up, (void *)rq);
+@@ -6036,13 +6058,16 @@ static bool distribute_cfs_runtime(struct cfs_bandwidth *cfs_b)
+ 		/* By the above checks, this should never be true */
+ 		SCHED_WARN_ON(cfs_rq->runtime_remaining > 0);
+ 
+-		raw_spin_lock(&cfs_b->lock);
++		/* raw_spin_lock(&cfs_b->lock); */
++		mutex_lock(&cfs_b->lock);
++
+ 		runtime = -cfs_rq->runtime_remaining + 1;
+ 		if (runtime > cfs_b->runtime)
+ 			runtime = cfs_b->runtime;
+ 		cfs_b->runtime -= runtime;
+ 		remaining = cfs_b->runtime;
+-		raw_spin_unlock(&cfs_b->lock);
++		/* raw_spin_unlock(&cfs_b->lock);*/
++		mutex_unlock(&cfs_b->lock);
+ 
+ 		cfs_rq->runtime_remaining += runtime;
+ 
+@@ -6127,10 +6152,12 @@ static int do_sched_cfs_period_timer(struct cfs_bandwidth *cfs_b, int overrun, u
+ 	 * This check is repeated as we release cfs_b->lock while we unthrottle.
+ 	 */
+ 	while (throttled && cfs_b->runtime > 0) {
+-		raw_spin_unlock_irqrestore(&cfs_b->lock, flags);
++		/* raw_spin_unlock_irqrestore(&cfs_b->lock, flags);*/
++		mutex_lock(&cfs_b->lock);
+ 		/* we can't nest cfs_b->lock while distributing bandwidth */
+ 		throttled = distribute_cfs_runtime(cfs_b);
+-		raw_spin_lock_irqsave(&cfs_b->lock, flags);
++		/* raw_spin_lock_irqsave(&cfs_b->lock, flags);*/
++		mutex_unlock(&cfs_b->lock);
+ 	}
+ 
+ 	/*
+@@ -6205,7 +6232,9 @@ static void __return_cfs_rq_runtime(struct cfs_rq *cfs_rq)
+ 	if (slack_runtime <= 0)
+ 		return;
+ 
+-	raw_spin_lock(&cfs_b->lock);
++	/* raw_spin_lock(&cfs_b->lock);*/
++	mutex_lock(&cfs_b->lock);
++
+ 	if (cfs_b->quota != RUNTIME_INF) {
+ 		cfs_b->runtime += slack_runtime;
+ 
+@@ -6214,7 +6243,8 @@ static void __return_cfs_rq_runtime(struct cfs_rq *cfs_rq)
+ 		    !list_empty(&cfs_b->throttled_cfs_rq))
+ 			start_cfs_slack_bandwidth(cfs_b);
+ 	}
+-	raw_spin_unlock(&cfs_b->lock);
++	/* raw_spin_unlock(&cfs_b->lock);*/
++	mutex_unlock(&cfs_b->lock);
+ 
+ 	/* even if it's not valid for return we don't want to try again */
+ 	cfs_rq->runtime_remaining -= slack_runtime;
+@@ -6238,21 +6268,25 @@ static __always_inline void return_cfs_rq_runtime(struct cfs_rq *cfs_rq)
+ static void do_sched_cfs_slack_timer(struct cfs_bandwidth *cfs_b)
+ {
+ 	u64 runtime = 0, slice = sched_cfs_bandwidth_slice();
+-	unsigned long flags;
++	/* unsigned long flags;*/
+ 
+ 	/* confirm we're still not at a refresh boundary */
+-	raw_spin_lock_irqsave(&cfs_b->lock, flags);
++	/* raw_spin_lock_irqsave(&cfs_b->lock, flags);*/
++	mutex_lock(&cfs_b->lock);
++
+ 	cfs_b->slack_started = false;
+ 
+ 	if (runtime_refresh_within(cfs_b, min_bandwidth_expiration)) {
+-		raw_spin_unlock_irqrestore(&cfs_b->lock, flags);
++		/* raw_spin_unlock_irqrestore(&cfs_b->lock, flags);*/
++		mutex_unlock(&cfs_b->lock);
+ 		return;
+ 	}
+ 
+ 	if (cfs_b->quota != RUNTIME_INF && cfs_b->runtime > slice)
+ 		runtime = cfs_b->runtime;
+ 
+-	raw_spin_unlock_irqrestore(&cfs_b->lock, flags);
++	/* raw_spin_unlock_irqrestore(&cfs_b->lock, flags);*/
++	mutex_unlock(&cfs_b->lock);
+ 
+ 	if (!runtime)
+ 		return;
+@@ -6336,12 +6370,13 @@ static enum hrtimer_restart sched_cfs_period_timer(struct hrtimer *timer)
+ {
+ 	struct cfs_bandwidth *cfs_b =
+ 		container_of(timer, struct cfs_bandwidth, period_timer);
+-	unsigned long flags;
++	/* unsigned long flags; */
+ 	int overrun;
+ 	int idle = 0;
+ 	int count = 0;
+ 
+-	raw_spin_lock_irqsave(&cfs_b->lock, flags);
++	/* raw_spin_lock_irqsave(&cfs_b->lock, flags); */
++	mutex_lock(&cfs_b->lock);
+ 	for (;;) {
+ 		overrun = hrtimer_forward_now(timer, cfs_b->period);
+ 		if (!overrun)
+@@ -6382,14 +6417,16 @@ static enum hrtimer_restart sched_cfs_period_timer(struct hrtimer *timer)
+ 	}
+ 	if (idle)
+ 		cfs_b->period_active = 0;
+-	raw_spin_unlock_irqrestore(&cfs_b->lock, flags);
++	/* raw_spin_unlock_irqrestore(&cfs_b->lock, flags);*/
++	mutex_unlock(&cfs_b->lock);
+ 
+ 	return idle ? HRTIMER_NORESTART : HRTIMER_RESTART;
+ }
+ 
+ void init_cfs_bandwidth(struct cfs_bandwidth *cfs_b, struct cfs_bandwidth *parent)
+ {
+-	raw_spin_lock_init(&cfs_b->lock);
++	/* raw_spin_lock_init(&cfs_b->lock); */
++	mutex_init(&cfs_b->lock);
+ 	cfs_b->runtime = 0;
+ 	cfs_b->quota = RUNTIME_INF;
+ 	cfs_b->period = ns_to_ktime(default_cfs_period());
+@@ -6417,7 +6454,8 @@ static void init_cfs_rq_runtime(struct cfs_rq *cfs_rq)
+ 
+ void start_cfs_bandwidth(struct cfs_bandwidth *cfs_b)
+ {
+-	lockdep_assert_held(&cfs_b->lock);
++	/* lockdep_assert_held(&cfs_b->lock);*/
++	WARN_ON_ONCE(!mutex_is_locked(&cfs_b->lock));
+ 
+ 	if (cfs_b->period_active)
+ 		return;
+@@ -6482,9 +6520,11 @@ static void __maybe_unused update_runtime_enabled(struct rq *rq)
+ 		struct cfs_bandwidth *cfs_b = &tg->cfs_bandwidth;
+ 		struct cfs_rq *cfs_rq = tg->cfs_rq[cpu_of(rq)];
+ 
+-		raw_spin_lock(&cfs_b->lock);
++		/* raw_spin_lock(&cfs_b->lock); */
++		mutex_lock(&cfs_b->lock);
+ 		cfs_rq->runtime_enabled = cfs_b->quota != RUNTIME_INF;
+-		raw_spin_unlock(&cfs_b->lock);
++		/* raw_spin_unlock(&cfs_b->lock); */
++		mutex_unlock(&cfs_b->lock);
+ 	}
+ 	rcu_read_unlock();
+ }
+@@ -11645,7 +11685,7 @@ out_unlock:
+ 	return 0;
+ }
+ 
+-static DEFINE_SPINLOCK(balancing);
++static DEFINE_MUTEX(balancing);
+ 
+ /*
+  * Scale the max load_balance interval with the number of CPUs in the system.
+@@ -11723,7 +11763,7 @@ static void rebalance_domains(struct rq *rq, enum cpu_idle_type idle)
+ 
+ 		need_serialize = sd->flags & SD_SERIALIZE;
+ 		if (need_serialize) {
+-			if (!spin_trylock(&balancing))
++			if (!mutex_trylock(&balancing))
+ 				goto out;
+ 		}
+ 
+@@ -11740,8 +11780,10 @@ static void rebalance_domains(struct rq *rq, enum cpu_idle_type idle)
+ 			sd->last_balance = jiffies;
+ 			interval = get_sd_balance_interval(sd, busy);
+ 		}
+-		if (need_serialize)
+-			spin_unlock(&balancing);
++		if (need_serialize){
++			/* spin_unlock(&balancing);*/
++			mutex_unlock(&balancing);
++		}
+ out:
+ 		if (time_after(next_balance, sd->last_balance + interval)) {
+ 			next_balance = sd->last_balance + interval;
+@@ -12810,7 +12852,8 @@ void init_cfs_rq(struct cfs_rq *cfs_rq)
+ 	cfs_rq->tasks_timeline = RB_ROOT_CACHED;
+ 	u64_u32_store(cfs_rq->min_vruntime, (u64)(-(1LL << 20)));
+ #ifdef CONFIG_SMP
+-	raw_spin_lock_init(&cfs_rq->removed.lock);
++	/* raw_spin_lock_init(&cfs_rq->removed.lock);*/
++	mutex_init(&cfs_rq->removed.lock);
+ #endif
+ }
+ 

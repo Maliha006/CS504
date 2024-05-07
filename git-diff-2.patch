@@ -1,0 +1,24 @@
+diff --git a/sched.h b/sched.h
+index ae50f21..c2e883d 100644
+--- a/sched.h
++++ b/sched.h
+@@ -351,7 +351,8 @@ extern struct list_head task_groups;
+ 
+ struct cfs_bandwidth {
+ #ifdef CONFIG_CFS_BANDWIDTH
+-	raw_spinlock_t		lock;
++	/* raw_spinlock_t		lock;*/
++	struct mutex 		lock;
+ 	ktime_t			period;
+ 	u64			quota;
+ 	u64			runtime;
+@@ -613,7 +614,8 @@ struct cfs_rq {
+ 	u64			last_update_time_copy;
+ #endif
+ 	struct {
+-		raw_spinlock_t	lock ____cacheline_aligned;
++		/* raw_spinlock_t	lock ____cacheline_aligned; */
++		struct mutex lock;
+ 		int		nr;
+ 		unsigned long	load_avg;
+ 		unsigned long	util_avg;
